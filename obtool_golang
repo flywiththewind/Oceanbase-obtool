@@ -1,0 +1,312 @@
+package main
+
+import (
+	"bufio"
+	"crypto/md5"
+	"encoding/base64"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+const configFile = ".obtool.cfg"
+const checksumFile = ".obtool.cfg.checksum"
+
+func main() {
+	currentDir, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Error getting current directory:", err)
+		return
+	}
+
+	addKey := getUname()
+	configPath := filepath.Join(currentDir, configFile)
+	checksumPath := filepath.Join(currentDir, checksumFile)
+
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		firstRun(currentDir, addKey, configPath, checksumPath)
+	}
+
+	config := loadConfig(configPath)
+	verifyConfigChecksum(configPath, checksumPath)
+
+	args := os.Args[1:]
+	if len(args) == 0 || args[0] == "-h" || args[0] == "-H" {
+		printUsage()
+		return
+	}
+
+	obConn := buildObConn(config, addKey)
+
+	for _, arg := range args {
+		switch arg {
+		case "server":
+			executeQuery(obConn, `SELECT /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ 
+				svr_ip, 
+				with_rootserver rs, 
+				zone, 
+				ORA_DECODE(start_service_time, 0, NULL, CAST(usec_to_time(start_service_time) AS DATETIME)) start_service_time, 
+				ORA_DECODE(stop_time, 0, NULL, CAST(usec_to_time(stop_time) AS DATETIME)) stop_time, 
+				ORA_DECODE(last_offline_time, 0, NULL, CAST(usec_to_time(last_offline_time) AS DATETIME)) last_offline_time, 
+				status, 
+				SUBSTR(build_version, 1, INSTR(build_version, '-') - 1) build_version 
+				FROM __all_server;`)
+
+			executeQuery(obConn, `SELECT /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ group_concat(svr_ip SEPARATOR ',') as servers, status, count(1) as count from __all_server group by status;`)
+		
+		
+		case "fault_server":
+			executeQuery(obConn, `select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ \
+				CONCAT(svr_ip, '\'s status is incorrect. ', \
+				'It\'s start_service_time is ', ORA_DECODE(start_service_time, 0, 'NULL', CAST(usec_to_time(start_service_time) AS DATETIME)), \
+				'. It\'s stop_time is ', ORA_DECODE(stop_time, 0, 'NULL', CAST(usec_to_time(stop_time) AS DATETIME)), \
+				'. It\'s last_offline_time is ', ORA_DECODE(last_offline_time, 0, 'NULL', CAST(usec_to_time(last_offline_time) AS DATETIME)), \
+				'. It\'s status is ', status, '.') warning \
+				FROM __all_server \
+				WHERE start_service_time = 0 OR stop_time <> 0 OR status <> 'active';`)
+			
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		case "server":
+			executeQuery(obConn, ``)
+		
+		default:
+			fmt.Println("Unsupported command:", arg)
+		}
+	}
+}
+
+func firstRun(currentDir, addKey, configPath, checksumPath string) {
+	clearScreen()
+	fmt.Println("First run this tool, you need to configure some parameters...")
+	fmt.Println("Have fun!")
+	fmt.Println("Press [Enter] to continue.")
+	bufio.NewReader(os.Stdin).ReadBytes('\n')
+
+	config := map[string]string{
+		"_OBUSER":     prompt("Please enter tenant sys username [root]: ", "root") + addKey,
+		"_OBPASSWD":   prompt("Please enter ob password [aaAA11__]: ", "aaAA11__") + addKey,
+		"_OBPORT":     prompt("Please enter ob port [2883]: ", "2883") + addKey,
+		"_OBHOST":     prompt("Please enter ob host [127.0.0.1]: ", "127.0.0.1") + addKey,
+		"_OBTENT":     prompt("Please enter ob tenant [sys]: ", "sys") + addKey,
+		"_OBCLUSTER":  prompt("Please enter ob cluster name and cluster id [obcluster]: ", "obcluster") + addKey,
+		"_OBCLIENT":   prompt("Please enter obclient [/usr/bin/obclient]: ", "/usr/bin/obclient") + addKey,
+	}
+
+	saveConfig(configPath, config)
+	saveChecksum(configPath, checksumPath)
+	printPathMessage(currentDir)
+}
+
+func getUname() string {
+	out, _ := exec.Command("uname", "-r").Output()
+	return strings.TrimSpace(string(out))
+}
+
+func prompt(message, defaultValue string) string {
+	fmt.Print(message)
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return defaultValue
+	}
+	return input
+}
+
+func saveConfig(path string, config map[string]string) {
+	file, _ := os.Create(path)
+	defer file.Close()
+	writer := bufio.NewWriter(file)
+	for key, value := range config {
+		encodedValue := base64.StdEncoding.EncodeToString([]byte(value))
+		fmt.Fprintf(writer, "%s=%s\n", key, encodedValue)
+	}
+	writer.Flush()
+}
+
+func saveChecksum(configFilePath, checksumFilePath string) {
+	checksum := getChecksum(configFilePath)
+	file, _ := os.Create(checksumFilePath)
+	defer file.Close()
+	writer := bufio.NewWriter(file)
+	fmt.Fprint(writer, checksum)
+	writer.Flush()
+}
+
+func getChecksum(filePath string) string {
+	file, _ := os.Open(filePath)
+	defer file.Close()
+	h := md5.New()
+	buf := make([]byte, 1024)
+	for {
+		n, err := file.Read(buf)
+		if err != nil {
+			break
+		}
+		h.Write(buf[:n])
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func loadConfig(filePath string) map[string]string {
+	file, _ := os.Open(filePath)
+	defer file.Close()
+	config := make(map[string]string)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			config[parts[0]] = parts[1]
+		}
+	}
+	return config
+}
+
+func verifyConfigChecksum(configFilePath, checksumFilePath string) {
+	currentChecksum := getChecksum(configFilePath)
+	originalChecksum := readChecksum(checksumFilePath)
+
+	if currentChecksum != originalChecksum {
+		fmt.Println("Warning! Configure file changed! Please remove configure file and rerun this program!!!")
+		os.Exit(1)
+	}
+}
+
+func readChecksum(filePath string) string {
+	file, _ := os.Open(filePath)
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	if scanner.Scan() {
+		return scanner.Text()
+	}
+	return ""
+}
+
+func buildObConn(config map[string]string, addKey string) string {
+	obHost := decodeBase64(config["_OBHOST"], addKey)
+	obPort := decodeBase64(config["_OBPORT"], addKey)
+	obUser := decodeBase64(config["_OBUSER"], addKey)
+	obPasswd := decodeBase64(config["_OBPASSWD"], addKey)
+	obTent := decodeBase64(config["_OBTENT"], addKey)
+
+	return fmt.Sprintf("%s -h%s -P%s -u%s@%s -p%s -A -c -Doceanbase -t -e",
+		decodeBase64(config["_OBCLIENT"], addKey), obHost, obPort, obUser, obTent, obPasswd)
+}
+
+func decodeBase64(encoded, addKey string) string {
+	decodedBytes, _ := base64.StdEncoding.DecodeString(encoded)
+	decodedStr := string(decodedBytes)
+	return strings.Replace(decodedStr, addKey, "", -1)
+}
+
+func executeQuery(cmd, query string) {
+	out, err := exec.Command("sh", "-c", fmt.Sprintf("%s \"%s\"", cmd, query)).Output()
+	if err != nil {
+		fmt.Println("Error executing command:", err)
+		return
+	}
+	fmt.Println(string(out))
+}
+
+func printPathMessage(currentDir string) {
+	fmt.Println("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+	fmt.Println("You can put this directory to PATH:")
+	fmt.Printf("Just like this: echo \"PATH=%s:$PATH\" >> ~/.bash_profile\n", currentDir)
+	fmt.Println("source ~/.bash_profile")
+	fmt.Println("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+}
+
+func printUsage() {
+	fmt.Println("Usage:")
+	fmt.Println("  go run main.go [ARGS]")
+	fmt.Println("    go run main.go server                                                             # display server status")
+	fmt.Println("    go run main.go fault_server                                                       # display fault server ,if zero represent ok")
+	fmt.Println("    go run main.go rs                                                                 # display rootservice status")
+	fmt.Println("    go run main.go zone                                                               # display zone status")
+	fmt.Println("    go run main.go unit                                                               # display unit status")
+	fmt.Println("    go run main.go resourcepool                                                       # display resourcepool status")
+	fmt.Println("    go run main.go tenant                                                             # display tenant status")
+	fmt.Println("    go run main.go tabledisplay [table_name]                                          # display tabledisplay status")
+	fmt.Println("    go run main.go event7day                                                          # display event7day status")
+	fmt.Println("    go run main.go rsswitch                                                           # display root service switch status")
+	fmt.Println("    go run main.go mergestatus                                                        # display mergestatus status")
+	fmt.Println("    go run main.go lockinfo                                                           # display lockinfo status")
+	fmt.Println("    go run main.go processlist                                                        # display all tenant processlist status")
+	fmt.Println("    go run main.go runtime [sql_id]                                                   # display sql runtime of plan cache")
+	fmt.Println("    go run main.go realplan [svr_ip] [svr_port] [tenant_id] [plan_id]                 # display real sql plan")
+	fmt.Println("    go run main.go lockinfo                                                           # display lock info")
+	fmt.Println("    go run main.go topsql [\"update t11\"] [10]                                         # display topsql status")
+	fmt.Println("    go run main.go observerlog [last n rows{10}] [log level{TRACE|ERROR|...}]         # display event7day status")
+	fmt.Println("    go run main.go parameter [ob_query_timeout]                                       # display parameter/variable values")
+	fmt.Println("    go run main.go getddl [table name]                                                # display table ddl")
+	fmt.Println("    go run main.go desc [owner.tablename]                                             # describe table")
+	fmt.Println("    go run main.go cluster                                                            # display cluster info")
+	fmt.Println("    go run main.go tenantmem                                                          # display tenant memory info")
+	fmt.Println("Examples:")
+	fmt.Println("    go run main.go server unit resourcepool")
+	fmt.Println("    go run main.go server")
+	fmt.Println("    go run main.go topsql t1 10")
+}
+
+func clearScreen() {
+	fmt.Print("\033[H\033[2J")
+}
