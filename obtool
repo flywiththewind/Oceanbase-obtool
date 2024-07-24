@@ -1,0 +1,409 @@
+#!/bin/bash
+
+# author: xiao pengfei
+# email: pengfei.xiao@qq.com
+# wechat: dqcrjsw
+# version: v1
+
+
+# set parameters
+
+_ADDKEY=$(uname -r)
+_CURRENT_DIR=$(cd $(dirname $0);pwd)
+
+if [ ! -f "${_CURRENT_DIR}/.obtool.cfg" ];then
+clear
+echo "first run this tool,you need to config some parameters..."
+echo "have fun!"
+echo "press [ Enter ] to continue."
+read
+echo -n "please enter tenant sys username [root]:"
+read _OBUSER
+echo "_OBUSER=`echo ${_OBUSER:-"root"}${_ADDKEY}|base64 -i`">${_CURRENT_DIR}/.obtool.cfg
+
+echo -n "please enter ob password [aaAA11__]:"
+read _OBPASSWD
+echo "_OBPASSWD=`echo ${_OBPASSWD:-"aaAA11__"}${_ADDKEY}|base64 -i`">>${_CURRENT_DIR}/.obtool.cfg
+
+echo -n "please enter ob port [2883]:"
+read _OBPORT
+echo "_OBPORT=`echo ${_OBPORT:-"2883"}${_ADDKEY}|base64 -i`">>${_CURRENT_DIR}/.obtool.cfg
+
+echo -n "please enter ob host [127.0.0.1]:"
+read _OBHOST
+echo "_OBHOST=`echo ${_OBHOST:-"127.0.0.1"}${_ADDKEY}|base64 -i`">>${_CURRENT_DIR}/.obtool.cfg
+
+echo -n "please enter ob tenant [sys]:"
+read _OBTENT
+echo "_OBTENT=`echo ${_OBTENT:-"sys"}${_ADDKEY}|base64 -i`">>${_CURRENT_DIR}/.obtool.cfg
+
+echo -n "please enter ob cluster name and cluster id [obcluser]:"
+read _OBCLUSTER
+echo "_OBCLUSTER=`echo ${_OBCLUSTER:-"obcluser"}${_ADDKEY}|base64 -i`">>${_CURRENT_DIR}/.obtool.cfg
+
+echo "_OBCLIENT=`which obclient`">>${_CURRENT_DIR}/.obtool.cfg
+
+[ ! -f ${_CURRENT_DIR}/.obtool.cfg ] && {
+echo "Attention!!! Configure file does not exist! exit"
+exit 99
+}
+
+md5sum ${_CURRENT_DIR}/.obtool.cfg|awk '{print $1}'>${_CURRENT_DIR}/.obtool.cfg.checksum
+
+echo "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
+echo "you can put this diectory to PATH:"
+echo "just like this: echo \"PATH=${_CURRENT_DIR}:\$PATH\">>~/.bash_profile"
+echo "source ~/.bash_profile"
+echo "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
+fi
+
+
+source ${_CURRENT_DIR}/.obtool.cfg
+_OBUSER2=$(echo ${_OBUSER}|base64 -d 2>/dev/null |sed "s/${_ADDKEY}//g")
+_OBPASSWD2=$(echo ${_OBPASSWD}|base64 -d 2>/dev/null|sed "s/${_ADDKEY}//g")
+_OBPORT2=$(echo ${_OBPORT}|base64 -d 2>/dev/null|sed "s/${_ADDKEY}//g")
+_OBHOST2=$(echo ${_OBHOST}|base64 -d 2>/dev/null|sed "s/${_ADDKEY}//g")
+_OBTENT2=$(echo ${_OBTENT}|base64 -d 2>/dev/null|sed "s/${_ADDKEY}//g")
+_OBCLUSTER2=$(echo ${_OBCLUSTER}|base64 -d 2>/dev/null|sed "s/${_ADDKEY}//g")
+
+
+_CFGCHECK=$(md5sum ${_CURRENT_DIR}/.obtool.cfg|awk '{print $1}')
+_ORICFGCHECK=$(cat ${_CURRENT_DIR}/.obtool.cfg.checksum)
+
+ob_conn="${_OBCLIENT} -h${_OBHOST2} -P${_OBPORT2} -u${_OBUSER2}@${_OBTENT2} -p"${_OBPASSWD2}" -A -c -Doceanbase -t -e"
+
+
+if [ "${_CFGCHECK}" != "${_ORICFGCHECK}" ];then
+echo "Warning! configure file changed!please remove configure file and rerun $0 !!!"
+fi
+
+
+obcheck()
+{
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ current_timestamp() as check_time;" 2>/dev/null || { 
+echo "ob connect error,please check $0 configure file."
+exit 999
+}
+}
+
+usage()
+{
+cat <<EOF
+Usage:
+  sh $0 [ARGS]
+    sh $0 server                                                             # display server status
+    sh $0 fault_server                                                       # display fault server ,if zero represent ok
+    sh $0 rs                                                                 # display rootservice status
+    sh $0 zone                                                               # display zone status
+    sh $0 unit                                                               # display unit status
+    sh $0 resourcepool                                                       # display resourcepool status
+    sh $0 tenant                                                             # display tenant status"
+    sh $0 tabledisplay [table_name]                                          # display tabledisplay status
+    sh $0 event7day                                                          # display event7day status
+    sh $0 rsswitch                                                           # display root service switch status
+    sh $0 mergestatus                                                        # display mergestatus status
+    sh $0 lockinfo                                                           # display lockinfo status
+    sh $0 processlist                                                        # display all tenant processlist status
+    sh $0 runtime [sql_id]                                                   # display sql runtime of plan cache
+    sh $0 realplan [svr_ip] [svr_port] [tenant_id] [plan_id]                 # display real sql plan
+    sh $0 lockinfo                                                           # display lock info
+    sh $0 topsql ["update t11"] [10]                                         # display topsql status
+    sh $0 observerlog [last n rows{10}] [log level{TRACE|ERROR|...}]         # display event7day status
+    sh $0 parameter [ob_query_timeout]                                       # display parameter/variable values
+    sh $0 getddl [table name]                                                # display table ddl
+    sh $0 desc [owner.tablename]                                             # describe table
+    sh $0 cluster                                                            # display cluster info
+    sh $0 tenantmem                                                          # display tenant memory info
+Examples:
+    sh $0 server unit resourcepool
+    sh $0 server
+    sh $0 topsql t1 10
+EOF
+} 
+
+#obcheck
+
+if [ "$#" -le 0 -o "$1" = "-h" -o "$1" = "-H" ];then
+usage
+fi
+
+while [ "$#" != 0 ];do
+
+# module begin
+
+if [ "$1" = "server" ];then
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ \
+  svr_ip, \
+  with_rootserver rs, \
+  zone, \
+  ORA_DECODE(start_service_time, 0, NULL, CAST(usec_to_time(start_service_time) AS DATETIME)) start_service_time, \
+  ORA_DECODE(stop_time, 0, NULL, CAST(usec_to_time(stop_time) AS DATETIME)) stop_time, \
+  ORA_DECODE(last_offline_time, 0, NULL, CAST(usec_to_time(last_offline_time) AS DATETIME)) last_offline_time, \
+  status, \
+  SUBSTR(build_version, 1, INSTR(build_version, '-') - 1) build_version \
+FROM __all_server;"
+
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ group_concat(svr_ip SEPARATOR ',') as servers, status, count(1) as count from __all_server group by status;"
+fi
+
+# module end
+
+
+if [ "$1" = "fault_server" ];then
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ \
+  CONCAT(svr_ip, '\'s status is incorrect. ', \
+  'It\'s start_service_time is ', ORA_DECODE(start_service_time, 0, 'NULL', CAST(usec_to_time(start_service_time) AS DATETIME)), \
+  '. It\'s stop_time is ', ORA_DECODE(stop_time, 0, 'NULL', CAST(usec_to_time(stop_time) AS DATETIME)), \
+  '. It\'s last_offline_time is ', ORA_DECODE(last_offline_time, 0, 'NULL', CAST(usec_to_time(last_offline_time) AS DATETIME)), \
+  '. It\'s status is ', status, '.') warning \
+FROM __all_server \
+WHERE start_service_time = 0 OR stop_time <> 0 OR status <> 'active';"
+fi
+
+if [ "$1" = "zone" ];then
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ a.zone,concat(a.svr_ip,':',a.svr_port) observer, cpu_total, (cpu_total-cpu_assigned) cpu_free, round(mem_total/1024/1024/1024) mem_total_gb,
+round((mem_total-mem_assigned)/1024/1024/1024) mem_free_gb, round(disk_total/1024/1024/1024) disk_total_gb,unit_num, substr(a.build_version,1,6) version,usec_to_time(b.start_service_time) start_service_time,b.status
+from 	__all_virtual_server_stat a join 	__all_server b on (a.svr_ip=b.svr_ip and a.svr_port=b.svr_port)
+order by a.zone, a.svr_ip;"
+
+${ob_conn} "
+select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ \
+b.zone, a.svr_ip, a.cpu_total, a.cpu_assigned cpu_ass, a.cpu_assigned_percent cpu_ass_percent, \
+(a.cpu_total-a.cpu_assigned) as cpu_free, \
+round(a.mem_total/1024/1024/1024, 2) as mem_total, round(a.mem_assigned/1024/1024/1024, 2) mem_ass, \
+round((a.mem_total-a.mem_assigned)/1024/1024/1024, 2) as mem_free, \
+a.mem_assigned_percent mem_ass_percent from __all_virtual_server_stat a,__all_server b where \
+a.svr_ip = b.svr_ip  order by \
+zone,cpu_assigned_percent desc;
+"
+
+fi
+
+if [ "$1" = "unit" ];then
+
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ unit_config_id,name,max_cpu,min_cpu,round(max_memory/1024/1024/ 1024) max_mem_gb,
+round(min_memory/1024/1024/1024) min_mem_gb, round(max_disk_size/1024/1024/1024) max_disk_size_gb from __all_unit_config
+order by unit_config_id;"
+
+fi
+
+if [ "$1" = "resourcepool" ];then
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ t1.name resource_pool_name, t2.name unit_config_name, t2.max_cpu, t2.min_cpu,
+round(t2.max_memory/1024/1024/1024) max_mem_gb, round(t2.min_memory/1024/1024/1024) min_mem_gb, t3.unit_id, t3.zone, concat(t3.svr_ip,':',t3.svr_port) observer,t4.tenant_id, t4.tenant_name
+from __all_resource_pool t1 join __all_unit_config t2 on (t1.unit_config_id=t2.unit_config_id)
+join __all_unit t3 on (t1.resource_pool_id = t3.resource_pool_id)
+left join __all_tenant t4 on (t1.tenant_id=t4.tenant_id) order by t1.resource_pool_id, t2.unit_config_id, t3.unit_id;"
+
+fi
+
+if [ "$1" = "tenant" ];then
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ a.zone,concat(a.svr_ip,':',a.svr_port) observer, cpu_total, (cpu_total-cpu_assigned) cpu_free, round(mem_total/1024/1024/1024) mem_total_gb,
+round((mem_total-mem_assigned)/1024/1024/1024) mem_free_gb, round(disk_total/1024/1024/1024) disk_total_gb,unit_num, substr(a.build_version,1,6) version,usec_to_time(b.start_service_time) start_service_time,b.status
+from 	__all_virtual_server_stat a join 	__all_server b on (a.svr_ip=b.svr_ip and a.svr_port=b.svr_port)
+order by a.zone, a.svr_ip;"
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ zone,svr_ip,svr_port,inner_port,with_rootserver,status,gmt_create from __all_server order by zone, svr_ip;"
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ tenant_id, tenant_name, case compatibility_mode when '0' then 'MySQL' else 'Oracle' end as compatibility_mode ,zone_list, locality ,primary_zone ,status,gmt_modified from __all_tenant;"
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/  t4.tenant_name,t1.name resource_pool_name, t2.name unit_config_name, t2.max_cpu, t2.min_cpu,
+round(t2.max_memory/1024/1024/1024) max_mem_gb, round(t2.min_memory/1024/1024/1024) min_mem_gb, t3.unit_id, t3.zone, concat(t3.svr_ip,':',t3.svr_port) observer,t4.tenant_id
+from __all_resource_pool t1 join __all_unit_config t2 on (t1.unit_config_id=t2.unit_config_id)
+join __all_unit t3 on (t1.resource_pool_id = t3.resource_pool_id)
+left join __all_tenant t4 on (t1.tenant_id=t4.tenant_id) order by t1.resource_pool_id, t2.unit_config_id, t3.unit_id;"
+
+fi
+
+if [ "$1" = "tabledisplay" ];then
+_TABNAME=$2
+_TABCOUNT=$3
+if [ ${_TABNAME:-'NOTAB'} = "NOTAB" ];then
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ t1.tenant_id,
+t1.tenant_name, t2.database_name, t3.table_id, t3.table_Name, t3.tablegroup_id, t3.part_num, t4.partition_Id, t4.zone, t4.svr_ip, case t4.role when '1' then 'leader' else 'follower' end as role,
+round(t4.data_size / 1024 / 1024) data_size_mb
+from gv\$tenant t1 join gv\$database t2
+on (t1.tenant_id = t2.tenant_id) join gv\$table t3
+on (t2.tenant_id = t3.tenant_id and t2.database_id = t3.database_id and
+t3.index_type = 0) left join gv\$partition t4
+on (t2.tenant_id = t4.tenant_id and
+(t3.table_id = t4.table_id or t3.tablegroup_id = t4.table_id) and
+t4.role in (1, 2)) where t1.tenant_id > 1000 order by t1.tenant_id,
+t3.tablegroup_id, t3.table_name,
+t4.partition_Id, t4.role limit ${_TABCOUNT:-20};"
+else
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ t1.tenant_id,
+t1.tenant_name, t2.database_name, t3.table_id, t3.table_Name, t3.tablegroup_id, t3.part_num, t4.partition_Id, t4.zone, t4.svr_ip, case t4.role when '1' then 'leader' else 'follower' end as role,
+round(t4.data_size / 1024 / 1024) data_size_mb
+from gv\$tenant t1 join gv\$database t2
+on (t1.tenant_id = t2.tenant_id) join gv\$table t3
+on (t2.tenant_id = t3.tenant_id and t2.database_id = t3.database_id and
+t3.index_type = 0) left join gv\$partition t4
+on (t2.tenant_id = t4.tenant_id and
+(t3.table_id = t4.table_id or t3.tablegroup_id = t4.table_id) and
+t4.role in (1, 2)) where t1.tenant_id > 1000 and t3.table_Name=upper('${_TABNAME}') order by t1.tenant_id,
+t3.tablegroup_id, t3.table_name,
+t4.partition_Id, t4.role limit ${_TABCOUNT:-20};"
+fi
+fi
+
+if [ "$1" = "event7day" ];then
+_EVENTNAME=$2
+echo "list top 50 cluster event:"
+if [ ${_EVENTNAME:-'NOEVENT'} = "NOTAB" ];then
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ *
+FROM __all_rootservice_event_history WHERE  gmt_create>date_sub(curdate(),interval 7 day)
+ORDER BY gmt_create DESC LIMIT 50;"
+else
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ *
+FROM __all_rootservice_event_history WHERE event like '%${_EVENTNAME}%' and gmt_create>date_sub(curdate(),interval 7 day)
+ORDER BY gmt_create DESC LIMIT 50;"
+fi
+fi
+
+if [ "$1" = "rsswitch" ];then
+
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ DATE_FORMAT(gmt_create, '%b%d %H:%i:%s') gmt_create_ , module, event, name1, value1, name2, value2, rs_svr_ip,name3,value3,name4,value4
+FROM __all_rootservice_event_history WHERE 1 = 1 AND module IN ('leader_coordinator', 'balancer' ) ORDER BY gmt_create DESC LIMIT 20;"
+fi
+
+if [ "$1" = "mergestatus" ];then
+${ob_conn} " select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ * from __all_zone where name ='merge_status';"
+fi
+
+if [ "$1" = "processlist" ];then
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ tenant,state,count(*) from __all_virtual_processlist group by tenant,state order by count(*),state desc limit 50;"
+
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ id,user,tenant,host,db,time,state,sql_id,trace_id,avg(retry_cnt),avg(time),count(*) from __all_virtual_processlist group by tenant,user,sql_id  order by count(*) desc limit 50;"
+fi
+
+if [ "$1" = "sqlruntime" ];then
+_SQLID=$2
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/  svr_ip,svr_port,tenant_id,plan_id,sql_id,hit_count,executions,avg_exe_usec,slowest_exe_usec,plan_id,type,last_active_time,QUERY_SQL from gv\$plan_cache_plan_stat where sql_id =\"${_SQLID}\";"
+fi
+
+
+if [ "$1" = "sqlid" ];then
+_SQLID=$2
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/  svr_ip,svr_port,tenant_id,TENANT_NAME,sql_id,trace_id from gv\$sql_audit where sql_id=\"${_SQLID}\"\G"
+fi
+
+
+if [ "$1" = "traceid" ];then
+_TRACEID=$2
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/  svr_ip,svr_port,tenant_id,TENANT_NAME,sql_id,trace_id from gv\$sql_audit where trace_id=\"${_TRACEID}\"\G"
+fi
+
+
+if [ "$1" = "realplan" ];then
+_SVRIP=$2
+_SVRPORT=$3
+_TENANTID=$4
+_PLANID=$5
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ plan_id,operator,name,rows,cost from __all_virtual_plan_cache_plan_explain where svr_ip='${_SVRIP}' and svr_port=${_SVRPORT} and tenant_id=${_TENANTID} and plan_id=${_PLANID};"
+fi
+
+
+if [ "$1" = "ind" ];then
+_TABNAME=$2
+echo "you can use this script to check indexes:"
+echo "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ index_name,listagg(column_name,',') within group (order by column_position) from all_ind_columns where table_name=upper('${_TABNAME}') group by index_name;"
+fi
+
+if [ "$1" = "lockinfo" ];then
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ a.*,b.table_name,b.tenant_name,b.database_name,b.table_type from gv\$Lock a,gv\$table b where a.table_id=b.table_id;"
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ * from gv\$Lock_wait_stat;"
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ a.*,b.* from gv\$Lock a,gv\$table b where a.table_id=b.table_id;"
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ * from gv\$sql_audit where SID in (select a.sid from gv\$Lock a,gv\$table b where a.table_id=b.table_id) limit 20;"
+fi
+
+if [ "$1" = "topsql" ];then
+_SQLTEXT=$2
+_SQLLIMIT=$3
+if [ ${_SQLTEXT:-'NOSQLTEXT'} = "NOSQLTEXT" ];then
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ * from gv\$sql_audit order by ELAPSED_TIME desc limit ${_SQLLIMIT:-10};"
+else
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ * from gv\$sql_audit where QUERY_SQL like '%${_SQLTEXT}%' order by ELAPSED_TIME desc limit ${_SQLLIMIT:-10};"
+fi
+fi
+
+if [ "$1" = "getddl" ];then
+_TABSCHEMA=$2
+if [ ${_TABSCHEMA:-'NOSQLTEXT'} = "NOSQLTEXT" ];then
+${ob_conn} "SELECT 'you don\'t specified any table name';"
+else
+
+echo -n "please enter need dump tabname host [127.0.0.1]:"
+read _TABOBHOST
+echo -n "please enter need dump tabname port [2883]:"
+read _TABOBPORT
+echo -n "please enter need dump tabname user [admin]:"
+read _TABOBUSER
+
+echo -n "please enter need dump tabname tenant [DMS_SHENGCHAN]:"
+read _TABOBTENANT
+
+echo -n "please enter need dump tabname cluster [zyl_poc1:1659055929]:"
+read _TABOBCLUSTER
+
+echo -n "please enter need dump tabname cluster password [123456]:"
+read _TABOBPASSWORD
+
+echo -n "please enter need dump tabname cluster sys password [123456]:"
+read _TABOBSYSPASS
+
+echo -n "please enter need dump tabname database name  [DMS_PROC]:"
+read _TABOBDBNAME
+
+echo -n "please enter need dump tabname   [BOD_OPPOR_INF]:"
+read _TABOBTABNAME
+
+echo -n "please enter need dump path   [/tmp/${_TABOBTABNAME}]:"
+read _TABOBTABPATH
+
+mkdir "${_TABOBTABPATH}"
+
+obdumper -h ${_TABOBHOST:-'127.0.0.1'} -P${_TABOBPORT:-2883} -u${_TABOBUSER:-'admin'} -t ${_TABOBTENANT} -c ${_TABOBCLUSTER} -p${_TABOBPASSWORD} --sys-password=${_TABOBSYSPASS} -D ${_TABOBDBNAME} --table ${_TABOBTABNAME} --ddl -f ${_TABOBTABPATH}
+
+cat /tmp/${_TABOBTABNAME}/data/${_TABOBDBNAME}/TABLE/${_TABOBTABNAME}-schema.sql
+fi
+fi
+
+
+if [ "$1" = "desc" ];then
+_TABNAME=$2
+${ob_conn} "desc ${_TABNAME};"
+fi
+
+
+if [ "$1" = "observerlog" ];then
+_NUM=$2
+_LEVEL=$3
+
+echo "### the last [ ${_NUM:-50} ] logs in observer.log"
+tail -${_NUM:-50} /home/admin/oceanbase/log/observer.log|grep -w "${_LEVEL:-" "}"|sed 's/, /,\n/g'
+echo '============================================================================================'
+echo "### the last  [ ${_NUM:-50} ] logs in observer.log.wf"
+tail -${_NUM:-50} /home/admin/oceanbase/log/observer.log.wf|grep -w "${_LEVEL:-" "}" |sed 's/, /,\n/g'
+fi
+
+###新增往下写
+
+if [ "$1" = "parameter" ];then
+_PARNAME=$2
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ name as parameter_name,value from __all_sys_parameter where name like '%${_PARNAME}%';"
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ name as variable_name,value from __all_sys_variable where name like '%${_PARNAME}%';"
+${ob_conn} "show variables like '%${_PARNAME}%';"
+${ob_conn} "show parameters like '%${_PARNAME}%';"
+fi
+
+if [ "$1" = "cluster" ];then
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ * from v\$ob_all_clusters;"
+fi
+
+if [ "$1" = "tenantmem" ];then
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ a.tenant_id,b.tenant_name, a.ip, round(a.active/1024/1024/1024) active_gb, round(a.total/1024/1024/1024) total_gb, round(a.freeze_trigger/1024/1024/1024) freeze_trg_gb, round(a.mem_limit/1024/1024/1024) mem_limit_gb, a.freeze_cnt , round((a.active/a.freeze_trigger),2) freeze_pct, round(a.total/a.mem_limit, 2) mem_usage FROM gv\$memstore a,gv\$tenant b  WHERE a.tenant_id >1000 and a.tenant_id=b.tenant_id ORDER BY a.tenant_id, a.ip;"
+
+${ob_conn} "select /*+READ_CONSISTENCY(WEAK), QUERY_TIMEOUT(100000000)*/ a.tenant_id,b.tenant_name, a.ip, round(a.active/1024/1024/1024) active_gb, round(a.total/1024/1024/1024) total_gb, round(a.freeze_trigger/1024/1024/1024) freeze_trg_gb, round(a.mem_limit/1024/1024/1024) mem_limit_gb, a.freeze_cnt , round((a.active/a.freeze_trigger),2) freeze_pct, max(round(a.total/a.mem_limit, 2)) mem_usage FROM gv\$memstore a,gv\$tenant b  WHERE a.tenant_id >1000 and a.tenant_id=b.tenant_id group by b.tenant_name ORDER BY a.tenant_id, a.ip;"
+
+fi
+
+
+shift
+done
